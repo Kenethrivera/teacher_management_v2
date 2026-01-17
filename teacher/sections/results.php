@@ -27,7 +27,6 @@
         color: #856404;
     }
 
-    /* Animation for switching views */
     .fade-in {
         animation: fadeIn 0.3s ease-in;
     }
@@ -124,8 +123,7 @@
                             <th class="text-end pe-4">Action</th>
                         </tr>
                     </thead>
-                    <tbody id="res_studentTable">
-                    </tbody>
+                    <tbody id="res_studentTable"></tbody>
                 </table>
             </div>
         </div>
@@ -137,7 +135,7 @@
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title fw-bold">Quiz Breakdown</h5>
+                <h5 class="modal-title fw-bold">Submission Details</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body bg-light">
@@ -148,7 +146,6 @@
 </div>
 
 <script>
-    // IIFE to prevent global scope pollution
     (function () {
         'use strict';
 
@@ -159,33 +156,23 @@
             type: document.getElementById('res_type'),
             status: document.getElementById('res_status'),
             container: document.getElementById('res_activitiesContainer'),
-
-            // Views
             listView: document.getElementById('results_list_view'),
             detailView: document.getElementById('results_detail_view'),
             backBtn: document.getElementById('res_backBtn'),
-
-            // Details
             detailTitle: document.getElementById('res_detailTitle'),
             detailMeta: document.getElementById('res_detailMeta'),
             detailMax: document.getElementById('res_detailMax'),
             studentTable: document.getElementById('res_studentTable'),
-
-            // Modal
             modalContent: document.getElementById('res_modalContent'),
-            breakdownModal: new bootstrap.Modal(document.getElementById('res_breakdownModal'))
+            // REMOVED: breakdownModal initialization here (it causes the bug)
         };
 
-        // --- INIT & LISTENERS ---
         function init() {
-            if (!els.container) return; // Guard
-
+            if (!els.container) return;
             loadFilters();
-
             [els.schoolYear, els.subject, els.quarter, els.type, els.status].forEach(el => {
                 el.addEventListener('change', loadActivities);
             });
-
             els.backBtn.addEventListener('click', () => {
                 els.detailView.classList.add('d-none');
                 els.listView.classList.remove('d-none');
@@ -200,7 +187,6 @@
                 data.forEach(sy => els.schoolYear.innerHTML += `<option value="${sy.id}">${sy.school_year}</option>`);
                 loadActivities();
             });
-
             fetch('api/get_subjects.php').then(r => r.json()).then(data => {
                 els.subject.innerHTML = '<option value="">All Subjects</option>';
                 data.forEach(s => els.subject.innerHTML += `<option value="${s.subject_id}">${s.subject_name}</option>`);
@@ -220,7 +206,7 @@
 
             fetch(`api/get_activities.php?${params}`).then(r => r.json()).then(data => {
                 if (data.length === 0) {
-                    els.container.innerHTML = '<div class="col-12 text-center text-muted py-5">No activities found.</div>';
+                    els.container.innerHTML = '<div class="col-12 text-center text-muted py-5">No activities found. Select filters above.</div>';
                     return;
                 }
 
@@ -236,67 +222,88 @@
                             
                             <div class="mt-auto pt-3 border-top d-flex justify-content-between align-items-center">
                                 <div class="small fw-bold text-primary">${parseFloat(act.max_score)} pts</div>
-                                <button class="btn btn-sm btn-outline-primary view-results-btn" 
-                                    data-id="${act.activity_id}"
-                                    data-title="${act.title}"
-                                    data-meta="${act.subject_name} • ${act.grade_level}-${act.section_name}">
-                                    View Results
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary edit-activity-btn"
+                                        data-act='${JSON.stringify(act).replace(/'/g, "&apos;")}'>
+                                        <i data-lucide="edit-2" style="width:14px"></i> Edit Max Score
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-primary view-results-btn" 
+                                        data-id="${act.activity_id}"
+                                        data-title="${act.title}"
+                                        data-meta="${act.subject_name} • ${act.grade_level}-${act.section_name}">
+                                        View Results
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 `).join('');
 
+                // Listeners
                 document.querySelectorAll('.view-results-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
+                    btn.addEventListener('click', () => {
                         openDetailView(btn.dataset.id, btn.dataset.title, btn.dataset.meta);
                     });
                 });
+
+                document.querySelectorAll('.edit-activity-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        editActivityBridge(JSON.parse(btn.dataset.act));
+                    });
+                });
+
+                if (window.lucide) lucide.createIcons();
             });
         }
 
-        // --- DETAIL VIEW LOGIC ---
+        // --- LOGIC 2: EDIT ACTIVITY (Bridge to Create Tab) ---
+        window.editActivityBridge = function (data) {
+            const createTab = document.querySelector('.nav-link[data-section="activities"]');
+            if (createTab) createTab.click();
+
+            setTimeout(() => {
+                if (window.loadForEdit) window.loadForEdit(data);
+                else console.error("loadForEdit function not found");
+            }, 100);
+        };
+
+        // --- LOGIC 3: VIEW STUDENT LIST ---
         function openDetailView(activityId, title, meta) {
             els.detailTitle.textContent = title;
             els.detailMeta.textContent = meta;
             els.studentTable.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Loading students...</td></tr>';
-
             els.listView.classList.add('d-none');
             els.detailView.classList.remove('d-none');
             els.detailView.classList.add('fade-in');
 
-            fetch(`api/get_activity_results.php?activity_id=${activityId}`)
-                .then(r => r.json())
-                .then(data => {
-                    els.detailMax.textContent = parseFloat(data.max_score);
+            fetch(`api/get_activity_results.php?activity_id=${activityId}`).then(r => r.json()).then(data => {
+                els.detailMax.textContent = parseFloat(data.max_score);
+                if (data.students.length === 0) {
+                    els.studentTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No students found.</td></tr>';
+                    return;
+                }
+                els.studentTable.innerHTML = data.students.map(s => {
+                    const statusBadge = getStatusBadge(s.status, s.submission_id);
+                    const scoreDisplay = s.score !== null ? `<span class="fw-bold">${s.score}</span> / ${data.max_score}` : '--';
 
-                    if (data.students.length === 0) {
-                        els.studentTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No students found in this section.</td></tr>';
-                        return;
-                    }
+                    const actionBtn = s.submission_id
+                        ? `<button class="btn btn-sm btn-light border view-breakdown-btn" data-sub="${s.submission_id}">View</button>`
+                        : '--';
 
-                    els.studentTable.innerHTML = data.students.map(s => {
-                        const statusBadge = getStatusBadge(s.status, s.submission_id);
-                        const scoreDisplay = s.score !== null ? `<span class="fw-bold">${s.score}</span> / ${data.max_score}` : '--';
-                        const actionBtn = s.submission_id
-                            ? `<button class="btn btn-sm btn-light border view-breakdown-btn" data-sub="${s.submission_id}">View</button>`
-                            : '<span class="text-muted small">--</span>';
+                    return `<tr>
+                        <td class="ps-4 fw-bold">${s.last_name}, ${s.first_name}</td>
+                        <td>${statusBadge}</td>
+                        <td>${s.submitted_at ? new Date(s.submitted_at).toLocaleDateString() : '--'}</td>
+                        <td>${scoreDisplay}</td>
+                        <td class="text-end pe-4">${actionBtn}</td>
+                    </tr>`;
+                }).join('');
 
-                        return `
-                            <tr>
-                                <td class="ps-4 fw-bold">${s.last_name}, ${s.first_name}</td>
-                                <td>${statusBadge}</td>
-                                <td>${s.submitted_at ? new Date(s.submitted_at).toLocaleDateString() : '--'}</td>
-                                <td>${scoreDisplay}</td>
-                                <td class="text-end pe-4">${actionBtn}</td>
-                            </tr>
-                        `;
-                    }).join('');
-
-                    document.querySelectorAll('.view-breakdown-btn').forEach(btn => {
-                        btn.addEventListener('click', () => openBreakdown(btn.dataset.sub));
-                    });
-                });
+                document.querySelectorAll('.view-breakdown-btn').forEach(btn =>
+                    btn.addEventListener('click', () => openBreakdown(btn.dataset.sub))
+                );
+            });
         }
 
         function getStatusBadge(status, subId) {
@@ -305,124 +312,91 @@
             return '<span class="badge bg-warning text-dark">Submitted</span>';
         }
 
-        // --- BREAKDOWN MODAL ---
+        // --- CRITICAL FIX: MODAL INITIALIZATION ON DEMAND ---
         function openBreakdown(submissionId) {
             els.modalContent.innerHTML = '<div class="text-center py-5"><div class="spinner-border"></div></div>';
-            els.breakdownModal.show();
 
-            fetch(`api/get_submission_details.php?submission_id=${submissionId}`)
-                .then(r => r.json())
-                .then(data => {
+            // 1. Get the Modal Element
+            const modalEl = document.getElementById('res_breakdownModal');
 
-                    // === CASE 1: FILE SUBMISSION (With Grading Box) ===
-                    if (data.type === 'file') {
-                        const path = '../uploads/student_submissions/' + data.file_path;
-                        const ext = data.file_path.split('.').pop().toLowerCase();
-                        const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+            // 2. Safe Initialization (Check if bootstrap exists, check if instance exists)
+            let modalInstance;
+            if (window.bootstrap) {
+                modalInstance = bootstrap.Modal.getInstance(modalEl);
+                if (!modalInstance) {
+                    modalInstance = new bootstrap.Modal(modalEl);
+                }
+                modalInstance.show();
+            } else {
+                console.error("Bootstrap is not loaded yet.");
+                return;
+            }
 
-                        // Current score or empty
-                        const currentScore = data.score !== null ? data.score : '';
+            fetch(`api/get_submission_details.php?submission_id=${submissionId}`).then(r => r.json()).then(data => {
 
-                        let fileDisplay = isImg
-                            ? `<img src="${path}" class="img-fluid border rounded shadow-sm mb-3" style="max-height: 400px;">`
-                            : `<div class="p-4 bg-light border rounded mb-3"><i data-lucide="file-text" style="width:32px"></i> ${data.file_path}</div>`;
+                // === IF FILE SUBMISSION: SHOW FILE + GRADING INPUT ===
+                if (data.type === 'file') {
+                    const path = '../uploads/student_submissions/' + data.file_path;
+                    const ext = data.file_path.split('.').pop().toLowerCase();
+                    const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
 
-                        els.modalContent.innerHTML = `
-                            <div class="row">
-                                <div class="col-md-8 text-center border-end">
-                                    <h6 class="mb-3 fw-bold text-muted">Student Submission</h6>
-                                    ${fileDisplay}
-                                    <div class="mt-2">
-                                        <a href="${path}" download class="btn btn-outline-secondary btn-sm">
-                                            <i data-lucide="download" style="width:14px"></i> Download
-                                        </a>
-                                    </div>
-                                </div>
+                    const fileDisplay = isImg
+                        ? `<img src="${path}" class="img-fluid border mb-3 rounded shadow-sm" style="max-height: 300px;">`
+                        : `<div class="p-4 bg-light border rounded mb-3 text-center"><i data-lucide="file-text" style="width:48px; height:48px;"></i><br>${data.file_path}</div>`;
 
-                                <div class="col-md-4">
-                                    <h6 class="mb-3 fw-bold text-primary">Grade Work</h6>
-                                    <div class="card bg-light border-0">
-                                        <div class="card-body">
-                                            <label class="form-label small fw-bold">Score (Max: ${data.max_score})</label>
-                                            <div class="input-group mb-3">
-                                                <input type="number" id="manualGradeInput" class="form-control" 
-                                                    value="${currentScore}" min="0" max="${data.max_score}">
-                                                <span class="input-group-text">/ ${data.max_score}</span>
-                                            </div>
-                                            <button class="btn btn-primary w-100" onclick="saveManualGrade(${submissionId}, ${data.max_score})">
-                                                Save Grade
-                                            </button>
-                                        </div>
+                    // Render Grading Interface
+                    els.modalContent.innerHTML = `
+                        <div class="row">
+                            <div class="col-md-8 border-end text-center">
+                                <h6 class="text-muted small fw-bold mb-3">Student File</h6>
+                                ${fileDisplay}
+                                <a href="${path}" download class="btn btn-outline-dark btn-sm mt-2"><i data-lucide="download" style="width:14px"></i> Download File</a>
+                            </div>
+                            <div class="col-md-4">
+                                <h6 class="text-primary fw-bold mb-3">Grade Submission</h6>
+                                <div class="card bg-light border-0">
+                                    <div class="card-body">
+                                        <label class="form-label small fw-bold">Score (Max: ${data.max_score})</label>
+                                        <input type="number" id="manualGradeInput" class="form-control mb-3 text-center fw-bold" value="${data.score || ''}" min="0" max="${data.max_score}">
+                                        <button class="btn btn-primary w-100" onclick="saveManualGrade(${submissionId}, ${data.max_score})">
+                                            <i data-lucide="save" style="width:16px"></i> Save Grade
+                                        </button>
                                     </div>
                                 </div>
                             </div>
-                        `;
-                        if (window.lucide) lucide.createIcons();
-                        return;
-                    }
-
-                    // === CASE 2: QUIZ BREAKDOWN ===
-                    if (data.length === 0) {
-                        els.modalContent.innerHTML = '<div class="alert alert-info">No detailed answers found.</div>';
-                        return;
-                    }
-
-                    els.modalContent.innerHTML = data.map((q, i) => {
-                        const isCorrect = q.is_correct == 1;
-                        const borderColor = isCorrect ? 'border-success' : 'border-danger';
-                        const icon = isCorrect
-                            ? '<i data-lucide="check-circle" class="text-success"></i>'
-                            : '<i data-lucide="x-circle" class="text-danger"></i>';
-
-                        let studentAns = q.answer_text;
-                        let correctAns = q.correct_key;
-
-                        if (q.question_type === 'multiple_choice') {
-                            studentAns = q.selected_option_text || '(No selection)';
-                            correctAns = q.correct_option_text;
-                        }
-
-                        return `
-                            <div class="card ${borderColor} border-start border-4 shadow-sm mb-3">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between mb-2">
-                                        <h6 class="fw-bold mb-0">Question ${i + 1}</h6>
-                                        <span class="badge ${isCorrect ? 'bg-success' : 'bg-danger'}">
-                                            ${parseFloat(q.points_earned)} / ${parseFloat(q.points)} pts
-                                        </span>
-                                    </div>
-                                    <p class="mb-3">${q.question_text}</p>
-                                    
-                                    <div class="bg-white rounded p-2 border mb-1 d-flex align-items-center gap-2">
-                                        ${icon} <strong>Answer:</strong> ${studentAns}
-                                    </div>
-                                    
-                                    ${!isCorrect ? `
-                                        <div class="small text-success mt-1">
-                                            <strong>Correct Answer:</strong> ${correctAns}
-                                        </div>
-                                    ` : ''}
+                        </div>`;
+                }
+                // === IF QUIZ SUBMISSION: SHOW QUESTION BREAKDOWN (NO GRADING) ===
+                else {
+                    els.modalContent.innerHTML = data.map((q, i) => `
+                        <div class="card mb-2 ${q.is_correct == 1 ? 'border-success' : 'border-danger'} border-start border-4">
+                            <div class="card-body py-2">
+                                <div class="d-flex justify-content-between">
+                                    <span class="fw-bold small">Question ${i + 1}</span>
+                                    <span class="badge ${q.is_correct == 1 ? 'bg-success' : 'bg-danger'}">${q.points_earned} pts</span>
+                                </div>
+                                <p class="mb-1 mt-1 small">${q.question_text}</p>
+                                <div class="bg-light p-2 rounded small">
+                                    <strong>Answer:</strong> ${q.answer_text || q.selected_option_text || '(No Answer)'}
                                 </div>
                             </div>
-                        `;
-                    }).join('');
-
-                    if (window.lucide) lucide.createIcons();
-                });
+                        </div>`).join('');
+                }
+                if (window.lucide) lucide.createIcons();
+            });
         }
 
-        // --- GLOBAL HELPER: MANUAL GRADING ---
+        // --- MANUAL GRADE SAVE ---
         window.saveManualGrade = function (subId, max) {
             const input = document.getElementById('manualGradeInput');
             const score = parseFloat(input.value);
 
             if (isNaN(score) || score < 0 || score > max) {
-                alert(`Please enter a valid score between 0 and ${max}`);
-                return;
+                return alert(`Invalid score. Must be between 0 and ${max}.`);
             }
 
             const btn = document.querySelector('button[onclick^="saveManualGrade"]');
-            const originalText = btn.innerHTML;
+            const oldText = btn.innerHTML;
             btn.innerHTML = 'Saving...';
             btn.disabled = true;
 
@@ -432,22 +406,24 @@
                 body: JSON.stringify({ submission_id: subId, score: score })
             })
                 .then(r => r.json())
-                .then(res => {
-                    if (res.success) {
-                        alert('Grade Saved!');
-                        els.breakdownModal.hide();
+                .then(d => {
+                    if (d.success) {
+                        alert('Grade Saved Successfully!');
+                        // Use the modal instance created in openBreakdown logic
+                        const modalEl = document.getElementById('res_breakdownModal');
+                        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                        if (modalInstance) modalInstance.hide();
                     } else {
-                        alert('Error: ' + res.message);
+                        alert(d.message);
                     }
                 })
-                .catch(err => alert('System Error'))
+                .catch(e => alert('System Error'))
                 .finally(() => {
-                    btn.innerHTML = originalText;
+                    btn.innerHTML = oldText;
                     btn.disabled = false;
                 });
         };
 
-        // BOOTSTRAP
         init();
     })();
 </script>

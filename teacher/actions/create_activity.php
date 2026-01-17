@@ -32,10 +32,10 @@ if (!$input) {
 // 4. Extract Basic Fields
 $school_year_id = $input['school_year_id'] ?? null;
 $subject_id = $input['subject_id'] ?? null;
-$section_ids = $input['section_ids'] ?? []; // This is now an ARRAY
+$section_ids = $input['section_ids'] ?? [];
 $quarter = $input['quarter'] ?? null;
 $component_type = $input['component_type'] ?? null;
-$item_number = $input['item_number'] ?? null; // NOTE: This might collide if we loop. Best to calculate per section.
+$item_number = $input['item_number'] ?? null;
 $title = trim($input['title'] ?? '');
 $description = trim($input['description'] ?? '');
 $activity_type = $input['activity_type'] ?? 'file';
@@ -52,10 +52,20 @@ if (!$school_year_id || !$subject_id || empty($section_ids) || !$title) {
 try {
     $pdo->beginTransaction();
 
+    // Prepare Manual Trigger Statement (Grading Component)
+    // This replaces the "after_activity_insert" SQL Trigger
+    // It creates the column in the Class Record
+    $insComponent = $pdo->prepare("
+        INSERT INTO grading_components 
+        (assignment_id, quarter, component_type, item_number, max_score, description, date_given)
+        VALUES (?, ?, ?, ?, ?, ?, CURDATE())
+        ON DUPLICATE KEY UPDATE max_score = VALUES(max_score), description = VALUES(description)
+    ");
+
     // === LOOP THROUGH EACH SECTION ===
     foreach ($section_ids as $sec_id) {
 
-        // A. Find the Assignment ID for this specific Section + Subject + Teacher
+        // A. Find the Assignment ID
         $assignStmt = $pdo->prepare("
             SELECT assignment_id FROM subject_assignments 
             WHERE teacher_id = ? AND subject_id = ? AND section_id = ? AND school_year_id = ?
@@ -63,20 +73,17 @@ try {
         $assignStmt->execute([$teacher_id, $subject_id, $sec_id, $school_year_id]);
         $assignment_id = $assignStmt->fetchColumn();
 
-        if (!$assignment_id) {
-            // Skip this section if the teacher isn't assigned to it
+        if (!$assignment_id)
             continue;
-        }
 
         // B. Check or Auto-Generate Item Number
-        // If user manually set Item #1, we try to use it. If it exists, we error out OR auto-increment.
-        // Let's stick to strict checking to avoid mess:
         $checkStmt = $pdo->prepare("
             SELECT activity_id FROM activities 
             WHERE assignment_id = ? AND quarter = ? AND component_type = ? AND item_number = ?
         ");
         $checkStmt->execute([$assignment_id, $quarter, $component_type, $item_number]);
         if ($checkStmt->fetch()) {
+            // Optional: You can choose to skip or throw error. Here we throw error to prevent duplicates.
             throw new Exception("Activity Item #$item_number already exists for one of the selected sections.");
         }
 
@@ -119,8 +126,18 @@ try {
             }
         }
 
-        // E. Sync with Class Record (DB Trigger handles grading_component creation, but we assume it runs)
-        // Manually fetch the component_id to init grades
+        // E. MANUAL TRIGGER LOGIC (Replacing SQL Trigger)
+        // 1. Create the Grading Component (The column in the gradebook)
+        $insComponent->execute([
+            $assignment_id,
+            $quarter,
+            $component_type,
+            $item_number,
+            $max_score,
+            $title
+        ]);
+
+        // 2. Get the new component_id to initialize student grades
         $compStmt = $pdo->prepare("
             SELECT component_id FROM grading_components 
             WHERE assignment_id = ? AND quarter = ? AND component_type = ? AND item_number = ?
@@ -128,8 +145,9 @@ try {
         $compStmt->execute([$assignment_id, $quarter, $component_type, $item_number]);
         $component_id = $compStmt->fetchColumn();
 
+        // 3. Initialize NULL grades for all active students in this section
+        // (This makes sure every student has a "cell" in the gradebook ready to be filled)
         if ($component_id) {
-            // Get Students in this section
             $studStmt = $pdo->prepare("
                 SELECT se.id AS subject_enrollment_id 
                 FROM subject_enrollments se
@@ -139,7 +157,6 @@ try {
             $studStmt->execute([$sec_id, $subject_id, $school_year_id]);
             $students = $studStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Init empty grades
             $gradeStmt = $pdo->prepare("INSERT IGNORE INTO grades (subject_enrollment_id, component_id, score) VALUES (?, ?, NULL)");
             foreach ($students as $s) {
                 $gradeStmt->execute([$s['subject_enrollment_id'], $component_id]);

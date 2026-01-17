@@ -1,7 +1,7 @@
 <?php
 // teacher/actions/update_grade.php
 
-// 1. Safety: Turn off HTML error display so it doesn't break JSON
+// 1. Safety
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
@@ -9,7 +9,6 @@ error_reporting(E_ALL);
 session_start();
 
 // 3. Database Connection
-// Ensure this path is correct. If your config folder is in the root, this is correct.
 if (!file_exists('../../config/database.php')) {
     header('Content-Type: application/json');
     echo json_encode(['success' => false, 'message' => 'Database config not found']);
@@ -20,7 +19,7 @@ require_once '../../config/database.php';
 header('Content-Type: application/json');
 
 try {
-    // 4. Auth Check (Manual check, no external file needed)
+    // 4. Auth Check
     if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'teacher') {
         throw new Exception('Unauthorized access');
     }
@@ -29,9 +28,8 @@ try {
     $json = file_get_contents('php://input');
     $input = json_decode($json, true);
 
-    if (!$input) {
+    if (!$input)
         throw new Exception('No data received');
-    }
 
     $submission_id = $input['submission_id'] ?? null;
     $score = $input['score'] ?? null;
@@ -51,15 +49,14 @@ try {
     $stmt->execute([$submission_id]);
     $max = $stmt->fetchColumn();
 
-    if ($max === false) {
+    if ($max === false)
         throw new Exception("Submission #$submission_id not found");
-    }
-
-    if ($score < 0 || $score > $max) {
+    if ($score < 0 || $score > $max)
         throw new Exception("Score must be between 0 and $max");
-    }
 
-    // 8. Update Database
+    $pdo->beginTransaction();
+
+    // 8. Update Submission Status (The specific activity record)
     $update = $pdo->prepare("
         UPDATE activity_submissions 
         SET score = ?, status = 'graded', graded_at = NOW() 
@@ -67,10 +64,42 @@ try {
     ");
     $update->execute([$score, $submission_id]);
 
+    // 9. MANUAL TRIGGER REPLACEMENT: Sync to Main Gradebook (grades table)
+    // Find the student enrollment ID and component ID based on the submission
+    $infoStmt = $pdo->prepare("
+        SELECT 
+            se.id as subject_enrollment_id, 
+            gc.component_id 
+        FROM activity_submissions sub
+        JOIN activities a ON sub.activity_id = a.activity_id
+        JOIN subject_assignments sa ON a.assignment_id = sa.assignment_id
+        JOIN grading_components gc ON gc.assignment_id = a.assignment_id 
+            AND gc.quarter = a.quarter 
+            AND gc.component_type = a.component_type 
+            AND gc.item_number = a.item_number
+        JOIN enrollments e ON e.student_id = sub.student_id AND e.section_id = sa.section_id
+        JOIN subject_enrollments se ON se.enrollment_id = e.id AND se.subject_id = sa.subject_id
+        WHERE sub.submission_id = ?
+    ");
+    $infoStmt->execute([$submission_id]);
+    $info = $infoStmt->fetch(PDO::FETCH_ASSOC);
+
+    // If we found the matching gradebook slot, update it
+    if ($info) {
+        $gradeStmt = $pdo->prepare("
+            INSERT INTO grades (subject_enrollment_id, component_id, score) 
+            VALUES (?, ?, ?) 
+            ON DUPLICATE KEY UPDATE score = VALUES(score)
+        ");
+        $gradeStmt->execute([$info['subject_enrollment_id'], $info['component_id'], $score]);
+    }
+
+    $pdo->commit();
     echo json_encode(['success' => true]);
 
 } catch (Exception $e) {
-    // Catch ANY error and return it as JSON
+    if ($pdo->inTransaction())
+        $pdo->rollBack();
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }
 ?>

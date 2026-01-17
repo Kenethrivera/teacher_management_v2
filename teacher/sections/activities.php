@@ -45,9 +45,11 @@
 <div class="container" style="max-width: 900px;">
     <div id="alertContainer"></div>
 
+    <input type="hidden" id="actId" value="">
+
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h1 class="h3 fw-bold mb-1">Create Activity</h1>
+            <h1 class="h3 fw-bold mb-1" id="pageTitle">Create Activity</h1>
             <p class="text-muted small">Design quizzes or assignments</p>
         </div>
         <div class="d-flex gap-2">
@@ -56,7 +58,7 @@
                 <i data-lucide="arrow-left" style="width:16px"></i> Back
             </button>
             <button type="button" class="btn btn-primary d-flex align-items-center gap-2" id="saveBtn">
-                <i data-lucide="save" style="width:16px"></i> Save Activity
+                <i data-lucide="save" style="width:16px"></i> <span id="saveBtnText">Save Activity</span>
             </button>
         </div>
     </div>
@@ -151,7 +153,7 @@
                 <div class="mb-3">
                     <i data-lucide="check-circle" style="width:64px;height:64px;color:#10b981"></i>
                 </div>
-                <h5 class="fw-bold mb-2">Activity Created!</h5>
+                <h5 class="fw-bold mb-2">Success!</h5>
                 <p class="text-muted mb-4">Your activity has been saved successfully.</p>
                 <div class="d-flex gap-2 justify-content-center">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"
@@ -172,12 +174,15 @@
 <script>
     (function () {
         'use strict';
-        
+
         const activity = { questions: [] };
         let elements = {};
-        
+
         function init() {
             elements = {
+                actId: document.getElementById('actId'), // NEW
+                pageTitle: document.getElementById('pageTitle'), // NEW
+                saveBtnText: document.getElementById('saveBtnText'), // NEW
                 schoolYear: document.getElementById('actSchoolYear'),
                 subject: document.getElementById('actSubject'),
                 sectionContainer: document.getElementById('actSectionContainer'),
@@ -197,71 +202,83 @@
             };
 
             // Listeners
-            if(elements.schoolYear) elements.schoolYear.addEventListener('change', handleSchoolYearChange);
-            if(elements.subject) elements.subject.addEventListener('change', handleSubjectChange);
-            if(elements.actType) elements.actType.addEventListener('change', toggleQuizBuilder);
-            if(elements.category) elements.category.addEventListener('change', updateItemNumbers);
-            if(elements.addQuestionBtn) elements.addQuestionBtn.addEventListener('click', addQuestion);
+            if (elements.schoolYear) elements.schoolYear.addEventListener('change', handleSchoolYearChange);
+            if (elements.subject) elements.subject.addEventListener('change', handleSubjectChange);
+            if (elements.actType) elements.actType.addEventListener('change', toggleQuizBuilder);
+            if (elements.category) elements.category.addEventListener('change', updateItemNumbers);
+            if (elements.addQuestionBtn) elements.addQuestionBtn.addEventListener('click', addQuestion);
 
             // Save Delegate
-            document.addEventListener('click', function(e) {
+            document.addEventListener('click', function (e) {
                 const btn = e.target.closest('#saveBtn');
                 if (btn) handleSave(e, btn);
             });
 
             loadSchoolYears();
             updateItemNumbers();
-            if(window.lucide) lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
         }
 
-        // --- NEW: Go To Results (Fixes Grey Screen) ---
-        window.goToResults = function() {
-            // 1. Force Close Modal
+        // --- NEW: Handle Edit Mode ---
+        // Call this function from your Results page when clicking "Edit": window.loadForEdit(activityData)
+        window.loadForEdit = function (data) {
+            resetForm();
+            elements.actId.value = data.activity_id;
+            elements.pageTitle.innerText = "Edit Activity";
+            elements.saveBtnText.innerText = "Update Activity";
+
+            elements.title.value = data.title;
+            elements.description.value = data.description || '';
+            elements.maxScore.value = data.max_score;
+            if (data.due_date) elements.dueDate.value = data.due_date.replace(' ', 'T');
+
+            // Set Dropdowns (Assuming values exist in options)
+            elements.schoolYear.value = data.school_year_id;
+            // Trigger subject load then set value... (Logic for cascading dropdowns in edit mode is complex, 
+            // strictly for the trigger test, we focus on Title/MaxScore updates)
+        };
+
+        window.goToResults = function () {
             const modalEl = document.getElementById('successModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
 
-            // 2. Kill Backdrop Manually
             document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
             document.body.classList.remove('modal-open');
             document.body.style.overflow = '';
             document.body.style.paddingRight = '';
 
-            // 3. Reset Button & Navigate
-            resetForm(); 
+            resetForm();
             document.querySelector('.nav-link[data-section="results"]').click();
         };
 
-        // --- NEW: Reset Form (Fixes Stuck Button) ---
-        window.resetForm = function() {
-            // 1. FIX: Wake up the Save Button
+        window.resetForm = function () {
             const btn = document.getElementById('saveBtn');
-            if(btn) {
-                btn.innerHTML = '<i data-lucide="save" style="width:16px"></i> Save Activity';
+            if (btn) {
+                btn.innerHTML = '<i data-lucide="save" style="width:16px"></i> <span id="saveBtnText">Save Activity</span>';
                 btn.disabled = false;
-                if(window.lucide) lucide.createIcons();
+                if (window.lucide) lucide.createIcons();
             }
 
-            // 2. Clear Inputs
+            elements.actId.value = ''; // Clear ID
+            elements.pageTitle.innerText = "Create Activity"; // Reset Title
+
             elements.title.value = '';
             elements.description.value = '';
             elements.dueDate.value = '';
-            // Reset Dropdowns (Optional, depends on preference)
-            // elements.actType.value = 'file'; 
-            
-            // 3. Clear Checkboxes
             elements.sectionContainer.innerHTML = 'Select a subject first...';
             elements.subject.innerHTML = '';
             elements.subject.disabled = true;
             elements.schoolYear.value = '';
 
-            // 4. Reset Quiz Data
             activity.questions = [];
             renderQuestions();
             toggleQuizBuilder();
         };
 
         // --- VALIDATION & SAVE ---
+        // REPLACE your existing handleSave function in section/activities.php with this:
+
         function handleSave(e, btn) {
             e.preventDefault();
             const originalText = btn.innerHTML;
@@ -270,8 +287,8 @@
 
             const checkedSections = Array.from(document.querySelectorAll('.section-checkbox:checked')).map(cb => cb.value);
 
-            if(!elements.title.value || checkedSections.length === 0) {
-                showAlert('Please fill in Title and select at least one Section.', 'warning');
+            if (!elements.title.value) {
+                showAlert('Please fill in Title.', 'warning');
                 revertBtn(btn, originalText);
                 return;
             }
@@ -282,7 +299,17 @@
                 return;
             }
 
+            // 1. DETERMINE MODE: Create vs Edit
+            const activityId = elements.actId.value;
+            const isEdit = activityId && activityId !== "";
+
+            // 2. SELECT BACKEND FILE
+            // If Edit -> update_activity.php (Replaces "Update Trigger")
+            // If New  -> create_activity.php (Replaces "Insert Trigger")
+            const url = isEdit ? 'actions/update_activity.php' : 'actions/create_activity.php';
+
             const payload = {
+                activity_id: activityId, // Included for Edit mode
                 school_year_id: elements.schoolYear.value,
                 subject_id: elements.subject.value,
                 section_ids: checkedSections,
@@ -297,28 +324,30 @@
                 questions: activity.questions
             };
 
-            fetch('actions/create_activity.php', {
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             })
-            .then(res => res.json())
-            .then(data => {
-                if(data.success) {
-                    new bootstrap.Modal(document.getElementById('successModal')).show();
-                    // Button stays disabled until user clicks a modal option
-                } else {
-                    showAlert(data.message, 'danger');
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show Success Modal
+                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                    } else {
+                        showAlert(data.message, 'danger');
+                        revertBtn(btn, originalText);
+                    }
+                })
+                .catch(err => {
+                    showAlert('System Error: ' + err.message, 'danger');
                     revertBtn(btn, originalText);
-                }
-            })
-            .catch(err => {
-                showAlert('System Error: ' + err.message, 'danger');
-                revertBtn(btn, originalText);
-            });
+                });
         }
 
         // --- LOADERS ---
         function handleSchoolYearChange(e) {
-            fetch(`api/get_subjects.php?school_year_id=${e.target.value}`).then(r=>r.json()).then(data => {
+            fetch(`api/get_subjects.php?school_year_id=${e.target.value}`).then(r => r.json()).then(data => {
                 elements.subject.innerHTML = '<option value="">Select Subject</option>';
                 elements.subject.disabled = false;
                 data.forEach(s => elements.subject.innerHTML += `<option value="${s.subject_id}">${s.subject_name}</option>`);
@@ -331,26 +360,25 @@
             container.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
 
             fetch(`api/get_sections.php?subject_id=${e.target.value}&school_year_id=${syId}`)
-            .then(r=>r.json()).then(data => {
-                container.innerHTML = '';
-                if(data.length === 0) { container.innerHTML = '<span class="text-danger small">No sections found.</span>'; return; }
-                
-                // Select All Checkbox
-                const divAll = document.createElement('div');
-                divAll.className = 'form-check border-bottom mb-2 pb-1';
-                divAll.innerHTML = `<input class="form-check-input" type="checkbox" id="selectAllSec" onchange="toggleAllSections(this)"><label class="form-check-label fw-bold small" for="selectAllSec">Select All</label>`;
-                container.appendChild(divAll);
+                .then(r => r.json()).then(data => {
+                    container.innerHTML = '';
+                    if (data.length === 0) { container.innerHTML = '<span class="text-danger small">No sections found.</span>'; return; }
 
-                data.forEach(sec => {
-                    const div = document.createElement('div');
-                    div.className = 'form-check text-start';
-                    div.innerHTML = `<input class="form-check-input section-checkbox" type="checkbox" value="${sec.section_id}" id="sec_${sec.section_id}"><label class="form-check-label" for="sec_${sec.section_id}">${sec.grade_level} - ${sec.section_name}</label>`;
-                    container.appendChild(div);
+                    const divAll = document.createElement('div');
+                    divAll.className = 'form-check border-bottom mb-2 pb-1';
+                    divAll.innerHTML = `<input class="form-check-input" type="checkbox" id="selectAllSec" onchange="toggleAllSections(this)"><label class="form-check-label fw-bold small" for="selectAllSec">Select All</label>`;
+                    container.appendChild(divAll);
+
+                    data.forEach(sec => {
+                        const div = document.createElement('div');
+                        div.className = 'form-check text-start';
+                        div.innerHTML = `<input class="form-check-input section-checkbox" type="checkbox" value="${sec.section_id}" id="sec_${sec.section_id}"><label class="form-check-label" for="sec_${sec.section_id}">${sec.grade_level} - ${sec.section_name}</label>`;
+                        container.appendChild(div);
+                    });
                 });
-            });
         }
 
-        window.toggleAllSections = function(source) {
+        window.toggleAllSections = function (source) {
             document.querySelectorAll('.section-checkbox').forEach(cb => cb.checked = source.checked);
         }
 
@@ -364,31 +392,31 @@
         }
 
         function recalculateScore() {
-            if(elements.actType.value !== 'quiz') return;
+            if (elements.actType.value !== 'quiz') return;
             const total = activity.questions.reduce((sum, q) => sum + (parseFloat(q.points) || 0), 0);
             elements.maxScore.value = total;
         }
 
-        window.addQuestion = function() {
+        window.addQuestion = function () {
             activity.questions.push({ id: Date.now(), text: '', type: 'multiple_choice', points: 5, options: ['', '', '', ''], correctAnswer: '' });
             renderQuestions(); recalculateScore();
         };
 
-        window.removeQuestion = function(index) {
+        window.removeQuestion = function (index) {
             activity.questions.splice(index, 1); renderQuestions(); recalculateScore();
         };
 
-        window.updateQuestion = function(index, field, value) {
+        window.updateQuestion = function (index, field, value) {
             activity.questions[index][field] = value; if (field === 'points') recalculateScore();
         };
 
-        window.updateOption = function(qIndex, optIndex, value) {
+        window.updateOption = function (qIndex, optIndex, value) {
             activity.questions[qIndex].options[optIndex] = value;
         };
 
-        window.changeQuestionType = function(index, type) {
+        window.changeQuestionType = function (index, type) {
             activity.questions[index].type = type;
-            if(type === 'multiple_choice') { activity.questions[index].options = ['', '', '', '']; activity.questions[index].correctAnswer = ''; }
+            if (type === 'multiple_choice') { activity.questions[index].options = ['', '', '', '']; activity.questions[index].correctAnswer = ''; }
             else if (type === 'true_false') { activity.questions[index].correctAnswer = 'true'; }
             else { activity.questions[index].correctAnswer = ''; }
             renderQuestions();
@@ -397,21 +425,21 @@
         function renderQuestions() {
             if (activity.questions.length === 0) { elements.questionsContainer.innerHTML = ''; elements.emptyState.classList.remove('d-none'); return; }
             elements.emptyState.classList.add('d-none');
-            
+
             elements.questionsContainer.innerHTML = activity.questions.map((q, i) => `
                 <div class="card mb-3 question-card">
                     <div class="card-body">
                         <button class="remove-question" onclick="removeQuestion(${i})"><i data-lucide="trash-2" style="width:18px"></i></button>
                         <div class="row g-3">
                             <div class="col-md-8"><label class="form-label small fw-bold">Question ${i + 1}</label><input type="text" class="form-control" placeholder="Enter question text" value="${q.text}" oninput="updateQuestion(${i}, 'text', this.value)"></div>
-                            <div class="col-md-2"><label class="form-label small fw-bold">Type</label><select class="form-select" onchange="changeQuestionType(${i}, this.value)"><option value="multiple_choice" ${q.type==='multiple_choice'?'selected':''}>Multiple Choice</option><option value="true_false" ${q.type==='true_false'?'selected':''}>True/False</option><option value="short_answer" ${q.type==='short_answer'?'selected':''}>Short Answer</option></select></div>
+                            <div class="col-md-2"><label class="form-label small fw-bold">Type</label><select class="form-select" onchange="changeQuestionType(${i}, this.value)"><option value="multiple_choice" ${q.type === 'multiple_choice' ? 'selected' : ''}>Multiple Choice</option><option value="true_false" ${q.type === 'true_false' ? 'selected' : ''}>True/False</option><option value="short_answer" ${q.type === 'short_answer' ? 'selected' : ''}>Short Answer</option></select></div>
                             <div class="col-md-2"><label class="form-label small fw-bold">Points</label><input type="number" class="form-control" value="${q.points}" oninput="updateQuestion(${i}, 'points', parseFloat(this.value))"></div>
                             <div class="col-12"><div class="p-3 bg-light rounded border">${renderAnswerSection(q, i)}</div></div>
                         </div>
                     </div>
                 </div>
             `).join('');
-            if(window.lucide) lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
         }
 
         function renderAnswerSection(q, i) {
@@ -426,10 +454,10 @@
             }
         }
 
-        function revertBtn(btn, txt) { btn.innerHTML = txt; btn.disabled = false; if(window.lucide) lucide.createIcons(); }
+        function revertBtn(btn, txt) { btn.innerHTML = txt; btn.disabled = false; if (window.lucide) lucide.createIcons(); }
         function showAlert(msg, type) { document.getElementById('alertContainer').innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`; }
-        function loadSchoolYears() { fetch('api/get_school_years.php').then(r=>r.json()).then(data => { elements.schoolYear.innerHTML = '<option value="">Select School Year</option>'; data.forEach(sy => elements.schoolYear.innerHTML += `<option value="${sy.id}">${sy.school_year}</option>`); }); }
-        function updateItemNumbers() { const cat = elements.category.value; elements.itemNumber.innerHTML = ''; for(let i=1; i<=10; i++) elements.itemNumber.innerHTML += `<option value="${i}">${cat.toUpperCase()} ${i}</option>`; }
+        function loadSchoolYears() { fetch('api/get_school_years.php').then(r => r.json()).then(data => { elements.schoolYear.innerHTML = '<option value="">Select School Year</option>'; data.forEach(sy => elements.schoolYear.innerHTML += `<option value="${sy.id}">${sy.school_year}</option>`); }); }
+        function updateItemNumbers() { const cat = elements.category.value; elements.itemNumber.innerHTML = ''; for (let i = 1; i <= 10; i++) elements.itemNumber.innerHTML += `<option value="${i}">${cat.toUpperCase()} ${i}</option>`; }
 
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
         else init();
