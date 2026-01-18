@@ -263,7 +263,18 @@
             document.getElementById('studentForm').reset();
             document.getElementById('st_action').value = 'add';
             document.getElementById('stModalTitle').innerText = 'Add New Student';
+
+            // UI Changes for Add Mode
             document.getElementById('credsSection').style.display = 'block';
+            const enrollSection = document.getElementById('st_enroll_sy').closest('.alert');
+            enrollSection.style.display = 'block';
+
+            // RE-ENABLE 'required' for Add Mode
+            document.getElementById('st_enroll_sy').required = true;
+            document.getElementById('st_enroll_sub').required = true;
+            document.getElementById('st_enroll_sec').required = true;
+            document.getElementById('st_email').required = true;
+            document.getElementById('st_pass').required = true;
 
             if (els.sy.value) els.stEnrollSy.value = els.sy.value;
             fetch('api/get_subjects.php').then(r => r.json()).then(d => {
@@ -321,6 +332,8 @@
         }
         window.openEditStudent = function (jsonStr) {
             const s = JSON.parse(decodeURIComponent(jsonStr));
+
+            // Fill basic info
             document.getElementById('st_id').value = s.student_id;
             document.getElementById('st_action').value = 'edit';
             document.getElementById('st_lrn').value = s.lrn;
@@ -328,8 +341,20 @@
             document.getElementById('st_lname').value = s.last_name;
             document.getElementById('st_sex').value = s.sex;
             document.getElementById('st_age').value = s.age;
+            document.getElementById('st_status').value = s.status;
+
+            // UI Changes for Edit Mode
             document.getElementById('credsSection').style.display = 'none';
-            document.getElementById('st_enroll_sy').closest('.alert').style.display = 'none';
+            const enrollSection = document.getElementById('st_enroll_sy').closest('.alert');
+            enrollSection.style.display = 'none';
+
+            // REMOVE 'required' from hidden enrollment fields so the form can save
+            document.getElementById('st_enroll_sy').required = false;
+            document.getElementById('st_enroll_sub').required = false;
+            document.getElementById('st_enroll_sec').required = false;
+            document.getElementById('st_email').required = false;
+            document.getElementById('st_pass').required = false;
+
             document.getElementById('stModalTitle').innerText = 'Edit Student Info';
             new bootstrap.Modal(document.getElementById('studentModal')).show();
         };
