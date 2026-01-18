@@ -23,7 +23,6 @@ header("Pragma: no-cache");
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
@@ -34,6 +33,21 @@ header("Pragma: no-cache");
         .section.active {
             display: block;
         }
+
+        /* Optional: Add a smooth fade-in effect */
+        .section.active {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 
@@ -42,7 +56,7 @@ header("Pragma: no-cache");
     <?php include '../includes/navbar_teacher.php'; ?>
 
     <div class="container-fluid mt-4 px-4">
-        <div id="dashboard" class="section">
+        <div id="dashboard" class="section active">
             <?php include 'sections/dashboard.php'; ?>
         </div>
         <div id="masterlist" class="section">
@@ -60,43 +74,42 @@ header("Pragma: no-cache");
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
     <script src="../assets/js/teacher.js"></script>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Initialize Lucide Icons
             if (window.lucide) lucide.createIcons();
 
-            // Simple Tab Switcher Logic (in case teacher.js is missing or broken)
+            // Tab Switcher Logic
             const links = document.querySelectorAll('.nav-link[data-section]');
             const sections = document.querySelectorAll('.section');
 
             links.forEach(link => {
-                link.addEventListener('click', (e) => {
+                link.addEventListener('click', function (e) {
+                    const targetId = this.getAttribute('data-section');
+
+                    // If the target is dashboard, we might want it to act like a normal link
+                    // but for SPA style, prevent default:
                     e.preventDefault();
 
-                    // Remove active from all links
+                    // Update Navbar Links
                     links.forEach(l => l.classList.remove('active'));
-                    // Add active to clicked link
-                    link.classList.add('active');
+                    this.classList.add('active');
 
-                    // Hide all sections
+                    // Update Sections
                     sections.forEach(s => s.classList.remove('active'));
-
-                    // Show target section
-                    const targetId = link.getAttribute('data-section');
                     const targetSection = document.getElementById(targetId);
-                    if (targetSection) targetSection.classList.add('active');
+                    if (targetSection) {
+                        targetSection.classList.add('active');
+                    }
+
+                    // Re-run Lucide icons in case new content was injected
+                    if (window.lucide) lucide.createIcons();
                 });
             });
         });
     </script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.lucide) lucide.createIcons();
-        });
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 
 </html>
