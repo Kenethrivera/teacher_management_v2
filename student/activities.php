@@ -313,12 +313,17 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student') {
                     }
                 });
                 formData.append('answers', JSON.stringify(answers));
+
             } else {
                 // Collect file
                 const fileInput = document.getElementById('fileUpload');
-                if (fileInput.files.length > 0) {
-                    formData.append('file', fileInput.files[0]);
+                if (fileInput.files.length === 0) {
+                    alert('Please select a file before submitting.');
+                    btn.disabled = false;
+                    btn.innerHTML = 'Submit Work';
+                    return; // Stop the function here
                 }
+                formData.append('file', fileInput.files[0]);
             }
 
             fetch('actions/submit_activity.php', {

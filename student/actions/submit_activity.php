@@ -44,6 +44,9 @@ try {
         }
 
         $uploadDir = '../../uploads/student_submissions/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
         if (!is_dir($uploadDir))
             mkdir($uploadDir, 0777, true);
 
