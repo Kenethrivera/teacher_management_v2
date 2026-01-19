@@ -1,14 +1,15 @@
 <?php
 // student/actions/submit_activity.php
-// FIXED: Multiple Choice Array Key Mapping
 
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+// 1. DISABLE ERROR PRINTING (Crucial for JSON responses)
+error_reporting(0);
+ini_set('display_errors', 0);
+
+// 2. Set JSON Header immediately
+header('Content-Type: application/json');
 
 session_start();
 require_once '../../config/database.php';
-
-header('Content-Type: application/json');
 
 if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -20,80 +21,92 @@ try {
     $type = $_POST['type'] ?? null;
     $student_id = $_SESSION['student_id'] ?? null;
 
+    // Fetch student_id if missing from session
     if (!$student_id) {
         $stmt = $pdo->prepare("SELECT student_id FROM students WHERE user_id = ?");
         $stmt->execute([$_SESSION['user_id']]);
         $student_id = $stmt->fetchColumn();
     }
 
-    if (!$activity_id || !$student_id)
+    if (!$activity_id || !$student_id) {
         throw new Exception("Missing Data");
+    }
 
     $pdo->beginTransaction();
-
-    // Check duplicate
-    $checkStmt = $pdo->prepare("SELECT submission_id FROM activity_submissions WHERE activity_id = ? AND student_id = ?");
-    $checkStmt->execute([$activity_id, $student_id]);
-    if ($checkStmt->fetch())
-        throw new Exception("Already submitted.");
 
     // --- FILE SUBMISSION ---
     if ($type === 'file') {
         if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception("File upload failed.");
+            throw new Exception("File upload failed. Error code: " . ($_FILES['file']['error'] ?? 'Unknown'));
         }
 
-        $uploadDir = '../../uploads/student_submissions/';
+        // FIX: Use Absolute Path for Render Compatibility
+        $uploadDir = __DIR__ . '/../../uploads/student_submissions/';
+        
+        // FIX: Silently create directory if missing
         if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
+            @mkdir($uploadDir, 0777, true);
         }
-        if (!is_dir($uploadDir))
-            mkdir($uploadDir, 0777, true);
 
+        // Generate unique filename
         $ext = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
         $filename = "act{$activity_id}_std{$student_id}_" . time() . "." . $ext;
+        $targetPath = $uploadDir . $filename;
 
-        if (!move_uploaded_file($_FILES['file']['tmp_name'], $uploadDir . $filename)) {
-            throw new Exception("Failed to save file.");
+        if (!move_uploaded_file($_FILES['file']['tmp_name'], $targetPath)) {
+            throw new Exception("Failed to save file to disk. Check permissions.");
         }
 
+        // Insert or Update (Allow Re-submission)
         $sql = "INSERT INTO activity_submissions (activity_id, student_id, submission_type, file_path, status, submitted_at) 
-                VALUES (?, ?, 'file', ?, 'submitted', NOW())";
+                VALUES (?, ?, 'file', ?, 'submitted', NOW())
+                ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), status = 'submitted', submitted_at = NOW()";
+        
         $pdo->prepare($sql)->execute([$activity_id, $student_id, $filename]);
 
     }
-    // --- QUIZ SUBMISSION ---
+    // --- QUIZ SUBMISSION (Your Fixed Logic) ---
     elseif ($type === 'quiz') {
         $answers = json_decode($_POST['answers'], true);
-        if (!is_array($answers))
-            throw new Exception("Invalid answers.");
+        if (!is_array($answers)) {
+            throw new Exception("Invalid answers format.");
+        }
 
         $totalScore = 0;
 
-        // 1. Create Submission
+        // 1. Create or Update Submission Record
         $subSql = "INSERT INTO activity_submissions (activity_id, student_id, submission_type, status, submitted_at) 
-                   VALUES (?, ?, 'quiz', 'graded', NOW())";
+                   VALUES (?, ?, 'quiz', 'graded', NOW())
+                   ON DUPLICATE KEY UPDATE status = 'graded', submitted_at = NOW()";
         $pdo->prepare($subSql)->execute([$activity_id, $student_id]);
-        $submission_id = $pdo->lastInsertId();
+        
+        // Get the ID (whether inserted or updated)
+        // Note: lastInsertId() might not work on updates in some SQL versions, so we fetch it.
+        $idStmt = $pdo->prepare("SELECT submission_id FROM activity_submissions WHERE activity_id = ? AND student_id = ?");
+        $idStmt->execute([$activity_id, $student_id]);
+        $submission_id = $idStmt->fetchColumn();
 
         // 2. Get Questions
         $qStmt = $pdo->prepare("SELECT * FROM quiz_questions WHERE activity_id = ?");
         $qStmt->execute([$activity_id]);
         $dbQuestions = $qStmt->fetchAll(PDO::FETCH_ASSOC);
         $qMap = [];
-        foreach ($dbQuestions as $q)
+        foreach ($dbQuestions as $q) {
             $qMap[$q['question_id']] = $q;
+        }
 
-        // 3. Get Correct Options (THE FIX IS HERE)
-        // We select question_id FIRST so it becomes the Key of the array
+        // 3. Get Correct Options
         $optStmt = $pdo->prepare("
             SELECT question_id, option_id FROM quiz_question_options 
             WHERE is_correct = 1 AND question_id IN (SELECT question_id FROM quiz_questions WHERE activity_id = ?)
         ");
         $optStmt->execute([$activity_id]);
-        $correctOptions = $optStmt->fetchAll(PDO::FETCH_KEY_PAIR); // [question_id => option_id]
+        $correctOptions = $optStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-        // 4. Grade
+        // 4. Grade Answers
+        // Clear old answers first to avoid duplicates on re-submission
+        $pdo->prepare("DELETE FROM student_quiz_answers WHERE submission_id = ?")->execute([$submission_id]);
+
         $ansStmt = $pdo->prepare("
             INSERT INTO student_quiz_answers (submission_id, question_id, answer_text, selected_option_id, is_correct, points_earned)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -103,8 +116,7 @@ try {
             $qId = $ans['q_id'];
             $userVal = trim($ans['val']);
             $question = $qMap[$qId] ?? null;
-            if (!$question)
-                continue;
+            if (!$question) continue;
 
             $isCorrect = 0;
             $selectedOptionId = null;
@@ -113,12 +125,10 @@ try {
             if ($question['question_type'] === 'multiple_choice') {
                 $selectedOptionId = $userVal;
                 $answerText = null;
-                // Correct Logic: Check if $correctOptions has this Q_ID and matches User_ID
                 if (isset($correctOptions[$qId]) && $correctOptions[$qId] == $selectedOptionId) {
                     $isCorrect = 1;
                 }
             } else {
-                // Text/TrueFalse
                 if (strcasecmp($userVal, $question['correct_answer']) == 0) {
                     $isCorrect = 1;
                 }
@@ -130,16 +140,19 @@ try {
             $ansStmt->execute([$submission_id, $qId, $answerText, $selectedOptionId, $isCorrect, $points]);
         }
 
-        // 5. Update Score
+        // 5. Update Total Score
         $pdo->prepare("UPDATE activity_submissions SET score = ? WHERE submission_id = ?")->execute([$totalScore, $submission_id]);
+        
+    
     }
 
     $pdo->commit();
-    echo json_encode(['success' => true]);
+    echo json_encode(['success' => true, 'message' => 'Submitted Successfully!']);
 
 } catch (Exception $e) {
-    if ($pdo->inTransaction())
+    if ($pdo->inTransaction()) {
         $pdo->rollBack();
+    }
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }
 ?>
